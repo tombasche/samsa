@@ -11,11 +11,11 @@ logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
 
 class PersistentConsumer:
     def __init__(
-        self, topic, group_id, bootstrap_servers, store="sqlite", block_time=15
+        self, topics, group_id, bootstrap_servers, table_name, store="sqlite", block_time=15
     ):
         self.bootstrap_servers = bootstrap_servers
         if store == "sqlite":
-            self.db = SQLiteClient(db_name="{}.db".format(group_id))
+            self.db = SQLiteClient(db_name="{}.db".format(group_id), table_name=table_name)
         elif store == "rocksdb":
             try:
                 from statestore.db.rocksdb import RocksDBClient
@@ -25,14 +25,13 @@ class PersistentConsumer:
             self.db = RocksDBClient()
         else:
             raise self.UnknownDatabaseSpecified("{} is not supported.".format(store))
-
+        self.table_name = table_name
         self._replica_topics = []
-        self.topic = topic
         self._partition_ids = []
         self._producer_has_started = False
         self._replica_consumer_has_started = False
         self.logger = logging.getLogger("kafka")
-        self.consumer = self._init_consumer([topic], group_id)
+        self.consumer = self._init_consumer(topics, group_id)
         self._group_id = group_id
         self._replica_producer = None
 
@@ -62,7 +61,7 @@ class PersistentConsumer:
             "log.connection.close": False,
         }
         self._replica_topics = [
-            "{}-{}-changelog".format(self.topic, partition_id)
+            "{}-{}-changelog".format(self.table_name, partition_id)
             for partition_id in partition_ids
         ]
         self._partition_ids = partition_ids
@@ -164,8 +163,8 @@ class PersistentConsumer:
                 logger.debug("Recovered {}={} at {}".format(key, value, partition))
                 self.db.put(key, value, partition)
 
-    def changelog_topic_name(self, topic, partition) -> str:
-        return "{}-{}-changelog".format(topic, partition)
+    def changelog_topic_name(self, partition) -> str:
+        return "{}-{}-changelog".format(self.table_name, partition)
 
     def save(self, key, value):
         """
@@ -183,7 +182,7 @@ class PersistentConsumer:
             ok = self.db.put(key, value, partition_id)
             if ok:
                 self._replicate_to_topic(
-                    self.changelog_topic_name(self.topic, partition_id), key, value
+                    self.changelog_topic_name(partition_id), key, value
                 )
 
     def query(self, key: str, partition_id: int) -> str:

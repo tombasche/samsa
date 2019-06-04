@@ -1,5 +1,6 @@
 import logging
 import sqlite3
+import string
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -7,18 +8,19 @@ logger = logging.getLogger(__name__)
 
 class SQLiteClient:
 
-    create_initial_sql = "CREATE TABLE IF NOT EXISTS changelog (key TEXT, value TEXT, partition_id INTEGER)"
-    put_sql = "INSERT INTO changelog (key, value, partition_id) VALUES (?, ?, ?)"
-    get_sql = "SELECT value FROM changelog WHERE key = ? AND partition_id = ?"
+    create_initial_sql = "CREATE TABLE IF NOT EXISTS {table_name} (key TEXT, value TEXT, partition_id INTEGER)"
 
-    def __init__(self, db_name):
+    def __init__(self, db_name, table_name):
         self.db_name = db_name
         self.connection = sqlite3.connect(self.db_name)
+        self.table_name = table_name
         self._initial_create()
 
     def _initial_create(self):
-        result = self.connection.execute(SQLiteClient.create_initial_sql)
-        print(result)
+        try:
+            self.connection.execute(SQLiteClient.create_initial_sql.format(table_name=self.table_name))
+        except Exception as ex:
+            raise Exception(f'Failed to create table with name {self.table_name} because of {ex}')
 
     def __delete__(self, instance):
         instance.connection.close()
@@ -33,8 +35,9 @@ class SQLiteClient:
         Returns: True/False if the put was successful.
 
         """
+        put_sql = f"INSERT INTO {self.table_name} (key, value, partition_id) VALUES (?, ?, ?)"
         result = self.connection.execute(
-            SQLiteClient.put_sql, (key, value, partition_id)
+            put_sql, (key, value, partition_id)
         )
         logger.debug("Put {}:{} to {}".format(key, value, self.db_name))
         self.connection.commit()
@@ -50,8 +53,9 @@ class SQLiteClient:
         Returns: The value specified, or nothing.
 
         """
+        get_sql = f"SELECT value FROM {self.table_name} WHERE key = ? AND partition_id = ?"
         cursor = self.connection.cursor()
-        result = cursor.execute(SQLiteClient.get_sql, (key, partition_id)).fetchone()
+        result = cursor.execute(get_sql, (key, partition_id)).fetchone()
         if result:
             logger.debug("Retrieved {} from {}".format(key, self.db_name))
             return result
