@@ -58,7 +58,7 @@ class SQLiteClient:
         result = cursor.execute(get_sql, (key, partition_id)).fetchone()
         if result:
             logger.debug("Retrieved {} from {}".format(key, self.db_name))
-            return result
+            return result[0]  # will be a tuple of a single value
         return None
 
     def close(self):
