@@ -35,7 +35,7 @@ class SQLiteClient:
         Returns: True/False if the put was successful.
 
         """
-        put_sql = f"INSERT INTO {self.table_name} (key, value, partition_id) VALUES (?, ?, ?)"
+        put_sql = f"INSERT OR REPLACE INTO {self.table_name} (key, value, partition_id) VALUES (?, ?, ?)"
         result = self.connection.execute(
             put_sql, (key, value, partition_id)
         )

@@ -1,6 +1,7 @@
 import logging
 
 import socket
+from typing import Optional
 
 from confluent_kafka import Consumer, Producer
 
@@ -11,7 +12,7 @@ logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
 
 class PersistentConsumer:
     def __init__(
-        self, topics, group_id, bootstrap_servers, table_name, store="sqlite", block_time=15
+        self, topics, group_id, bootstrap_servers, table_name, store="sqlite", block_time=3.0
     ):
         self.bootstrap_servers = bootstrap_servers
         if store == "sqlite":
@@ -34,8 +35,11 @@ class PersistentConsumer:
         self.consumer = self._init_consumer(topics, group_id)
         self._group_id = group_id
         self._replica_producer = None
-
         self._block_time = block_time
+        if not self._replica_consumer_has_started:
+            self._init_replica_consumer([0])
+            self._replica_consumer_has_started = True
+            self._recover_from_topic()
 
     def __enter__(self):
         """ Entered statestore context manager"""
@@ -45,6 +49,8 @@ class PersistentConsumer:
         """Method called when exiting context manager"""
         logger.debug("Exiting persistent consumer...")
         self.consumer.close()
+        logger.debug('Flushing any remaining messages to Kafka...')
+        self._replica_producer.flush()
         self.db.close()
         if self._replica_consumer_has_started:
             self._replica_consumer.close()
@@ -70,17 +76,21 @@ class PersistentConsumer:
         logger.info("Initialized producer for topic {}".format(self._replica_topics))
         self._producer_has_started = True
         self._replica_producer = producer
-        if not self._replica_consumer_has_started:
-            self._replica_consumer = self._init_consumer(
-                self._replica_topics, group_id="{}-statestore".format(self._group_id)
-            )
-            self._replica_consumer_has_started = True
-            self._recover_from_topic()
         return producer
 
-    def _init_replica_consumer(self) -> Consumer:
+    def _set_replica_topics(self, partition_ids=None):
+        """ Set the topics names to replicate back to the broker"""
+        if partition_ids:
+            self._partition_ids = partition_ids
+        self._replica_topics = [
+            "{}-{}-changelog".format(self.table_name, partition_id)
+            for partition_id in self._partition_ids
+        ]
+
+    def _init_replica_consumer(self, partition_ids=None) -> Consumer:
+        """ Initialise the replica consumer and optionally set the partition_ids """
         group_id = self._group_id
-        topics = self._replica_topics
+        self._set_replica_topics(partition_ids)
         consumer_config = {
             "bootstrap.servers": self.bootstrap_servers,
             "group.id": group_id,
@@ -91,14 +101,17 @@ class PersistentConsumer:
         }
 
         consumer = Consumer(consumer_config, logger=self.logger)
-        consumer.subscribe(topics)
+        consumer.subscribe(self._replica_topics)
         self._replica_consumer = consumer
         self._replica_consumer_has_started = True
 
     def _init_consumer(self, topics, group_id) -> Consumer:
         """
-        Initialise a consumer which will consume replicated messages
-        if the consumer crashes.
+        Initialise a consumer which will be used to consumer whatever
+        topics we specify.
+        Args:
+            topics: The topics for the main consumer
+            group_id: Consumer group id specified on start.
         Returns: Consumer
 
         """
@@ -112,11 +125,27 @@ class PersistentConsumer:
         }
 
         def _on_assign(_, partitions):
-            """Rebalancing..."""
-            self._partition_ids = [partition.partition for partition in partitions]
+            """
+            If the main consumer gets reassigned different partitions, then
+            we reset the producer to the new partition ids specified, and
+            recover any message for those partition ids.
+            Args:
+                _: ?
+                partitions: list of partitions we've been reassigned.
+
+            Returns:
+
+            """
+            if not partitions:
+                logger.debug('No partitions assigned')
+                return
+            new_ids = [partition.partition for partition in partitions]
+            if new_ids == self._partition_ids:
+                return
+
+            self._partition_ids = new_ids
             logger.debug("Rebalancing to partitions {}".format(self._partition_ids))
-            if not self._producer_has_started:
-                self._init_producer(self._partition_ids)
+            self._init_producer(self._partition_ids)
             self._recover_from_topic()
 
         consumer = Consumer(consumer_config, logger=self.logger)
@@ -146,17 +175,22 @@ class PersistentConsumer:
         """
         if not self._replica_consumer_has_started:
             self._init_replica_consumer()
+
         received_all = False
         first_run = True
         while not received_all:
             if first_run:
-                block_time = 5
+                block_time = 2.0
                 first_run = False
             else:
                 block_time = self._block_time
-            msgs = self._replica_consumer.consume(timeout=block_time)
-            received_all = msgs is not None
-            for msg in msgs:
+            logger.debug('Consuming from replica and waiting {}'.format(block_time))
+            msg = self._replica_consumer.poll(timeout=block_time)
+            received_all = msg is not None
+            if msg:
+                if msg.error():
+                    logger.exception('Error fetching message on recovery')
+                    continue
                 key = msg.key().decode("utf-8")
                 value = msg.value().decode("utf-8")
                 partition = msg.partition()
@@ -164,6 +198,7 @@ class PersistentConsumer:
                 self.db.put(key, value, partition)
 
     def changelog_topic_name(self, partition) -> str:
+        """ Generate the name of the topic for a given partition and table """
         return "{}-{}-changelog".format(self.table_name, partition)
 
     def save(self, key, value):
@@ -185,15 +220,19 @@ class PersistentConsumer:
                     self.changelog_topic_name(partition_id), key, value
                 )
 
-    def query(self, key: str, partition_id: int) -> str:
+    def query(self, key: str) -> Optional[str]:
         """
         Query the data store for a specific key and partition
         Args:
-            key:
-            partition_id:
+            key: string to identify the key/value pair
         Returns:
         """
-        return self.db.get(key, partition_id)
+        for partition_id in self._partition_ids:
+            data = self.db.get(key, partition_id)
+            if data:
+                return data
+        logger.debug('No data found for key {}'.format(key))
+        return None
 
     class UnknownDatabaseSpecified(Exception):
         """
