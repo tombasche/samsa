@@ -12,21 +12,36 @@ A python implementation of the state stores concept within the Kafka Streams API
 You can run rocksdb locally on OSX with `brew install rocksdb`. It's not a DB in the traditional sense, but really just
 a super fast way to store stuff on disk (as fast as that really is!).
 
-## The following is a pretty simple way of pulling data from kafka, and saving it to a local store. The default is sqlite but rocksdb is also possible.
+## Example 
+The following is a pretty simple way of pulling data from kafka, and saving it to a local store. The default is sqlite but rocksdb is also possible.
+The example below:
+
+1. Initialises a consumer with a table called 'deployment_status' 
+2. Fetches the deployment object for the received message from topic 'events.connection.status'
+2. Compares it to the local store and handles it accordingly
+3. It then saves the message to the store for future computation.
 
 ```
 def loop():
-    topic = CONNECTION_STATUS_TOPIC
+    topic = "events.connection.status"
     with PersistentConsumer(
-        topic, group_id=KAFKA_GROUP_ID, bootstrap_servers="someKafka.repositpower.net:9092"
+            topic, table_name="deployment_status", group_id=KAFKA_GROUP_ID,
+            bootstrap_servers="localhost:9092"
     ) as store:
         while True:
             msg = store.consumer.poll(timeout=3.4)
             if msg:
                 key = msg.key().decode("utf-8")
-                value = msg.value().decode("utf-8")
-                store.save(key, value)
-            else:
-                data = store.query("testec001", 0)
-                print(data)
+                depl = Deployment.get(key)
+                if depl.site is not None and depl.state == "COMMISSIONED":
+                    value = json.loads(msg.value().decode("utf-8"))["data"]["status"]
+                    status = store.query(key)
+                    if status != value:
+                        print(f"Status has changed from {status} to {value} for depl {key}!")
+                    else:
+                        print("No status change, nothing to see here!")
+                    store.save(key, value)
+                
+if __name__ == "__main__":
+    loop()                
 ```
