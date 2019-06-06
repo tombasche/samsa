@@ -1,9 +1,11 @@
 import logging
+import os
 import sqlite3
-import string
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
+
+DB_LOCATION = os.environ.get('DB_LOCATION', '/tmp')
 
 
 class SQLiteClient:
@@ -12,9 +14,13 @@ class SQLiteClient:
 
     def __init__(self, db_name, table_name):
         self.db_name = db_name
-        self.connection = sqlite3.connect(self.db_name)
+        self.connection = sqlite3.connect(self._database_path)
         self.table_name = table_name
         self._initial_create()
+
+    @property
+    def _database_path(self):
+        return os.path.join(DB_LOCATION, self.db_name)
 
     def _initial_create(self):
         try:
