@@ -5,7 +5,7 @@ from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
-DB_LOCATION = os.environ.get('DB_LOCATION', '/tmp')
+DB_LOCATION = os.environ.get("DB_LOCATION", "/tmp")
 
 
 class SQLiteClient:
@@ -24,9 +24,13 @@ class SQLiteClient:
 
     def _initial_create(self):
         try:
-            self.connection.execute(SQLiteClient.create_initial_sql.format(table_name=self.table_name))
+            self.connection.execute(
+                SQLiteClient.create_initial_sql.format(table_name=self.table_name)
+            )
         except Exception as ex:
-            raise Exception(f'Failed to create table with name {self.table_name} because of {ex}')
+            raise Exception(
+                f"Failed to create table with name {self.table_name} because of {ex}"
+            )
 
     def __delete__(self, instance):
         instance.connection.close()
@@ -42,9 +46,7 @@ class SQLiteClient:
 
         """
         put_sql = f"INSERT OR REPLACE INTO {self.table_name} (key, value, partition_id) VALUES (?, ?, ?)"
-        result = self.connection.execute(
-            put_sql, (key, value, partition_id)
-        )
+        result = self.connection.execute(put_sql, (key, value, partition_id))
         logger.debug("Put {}:{} to {}".format(key, value, self.db_name))
         self.connection.commit()
         return result.rowcount == 1
@@ -59,7 +61,9 @@ class SQLiteClient:
         Returns: The value specified, or nothing.
 
         """
-        get_sql = f"SELECT value FROM {self.table_name} WHERE key = ? AND partition_id = ?"
+        get_sql = (
+            f"SELECT value FROM {self.table_name} WHERE key = ? AND partition_id = ?"
+        )
         cursor = self.connection.cursor()
         result = cursor.execute(get_sql, (key, partition_id)).fetchone()
         if result:

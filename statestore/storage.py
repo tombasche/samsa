@@ -1,22 +1,30 @@
 import logging
 
 import socket
-from typing import Optional
+from typing import Optional, List
 
 from confluent_kafka import Consumer, Producer
 
 from statestore.db.sqldb import SQLiteClient
 
-logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
+logger = logging.getLogger(__name__)  # noqa
 
 
 class PersistentConsumer:
     def __init__(
-        self, topics, group_id, bootstrap_servers, table_name, store="sqlite", block_time=3.0
+        self,
+        topics,
+        group_id,
+        bootstrap_servers,
+        table_name,
+        store="sqlite",
+        block_time=3.0,
     ):
         self.bootstrap_servers = bootstrap_servers
         if store == "sqlite":
-            self.db = SQLiteClient(db_name="{}.db".format(group_id), table_name=table_name)
+            self.db = SQLiteClient(
+                db_name="{}.db".format(group_id), table_name=table_name
+            )
         elif store == "rocksdb":
             try:
                 from statestore.db.rocksdb import RocksDBClient
@@ -25,7 +33,9 @@ class PersistentConsumer:
                 raise
             self.db = RocksDBClient()
         else:
-            raise self.UnknownDatabaseSpecified("{} is not supported.".format(store))
+            raise self.UnknownDatabaseSpecified(
+                "Storage method '{}' is not supported.".format(store)
+            )
         self.table_name = table_name
         self._replica_topics = []
         self._partition_ids = []
@@ -49,13 +59,13 @@ class PersistentConsumer:
         """Method called when exiting context manager"""
         logger.debug("Exiting persistent consumer...")
         self.consumer.close()
-        logger.debug('Flushing any remaining messages to Kafka...')
+        logger.debug("Flushing any remaining messages to Kafka...")
         self._replica_producer.flush()
         self.db.close()
         if self._replica_consumer_has_started:
             self._replica_consumer.close()
 
-    def _init_producer(self, partition_ids) -> Producer:
+    def _init_producer(self, partition_ids: List[int]) -> Producer:
         """
         Initialise a producer which will replicate received messages
         Returns: Producer
@@ -78,7 +88,7 @@ class PersistentConsumer:
         self._replica_producer = producer
         return producer
 
-    def _set_replica_topics(self, partition_ids=None):
+    def _set_replica_topics(self, partition_ids: List = None):
         """ Set the topics names to replicate back to the broker"""
         if partition_ids:
             self._partition_ids = partition_ids
@@ -87,7 +97,7 @@ class PersistentConsumer:
             for partition_id in self._partition_ids
         ]
 
-    def _init_replica_consumer(self, partition_ids=None) -> Consumer:
+    def _init_replica_consumer(self, partition_ids: List = None) -> Consumer:
         """ Initialise the replica consumer and optionally set the partition_ids """
         group_id = self._group_id
         self._set_replica_topics(partition_ids)
@@ -105,7 +115,7 @@ class PersistentConsumer:
         self._replica_consumer = consumer
         self._replica_consumer_has_started = True
 
-    def _init_consumer(self, topics, group_id) -> Consumer:
+    def _init_consumer(self, topics: List[str], group_id: str) -> Consumer:
         """
         Initialise a consumer which will be used to consumer whatever
         topics we specify.
@@ -124,7 +134,7 @@ class PersistentConsumer:
             "partition.assignment.strategy": "range",
         }
 
-        def _on_assign(_, partitions):
+        def _on_assign(_, partitions: List):
             """
             If the main consumer gets reassigned different partitions, then
             we reset the producer to the new partition ids specified, and
@@ -137,7 +147,7 @@ class PersistentConsumer:
 
             """
             if not partitions:
-                logger.debug('No partitions assigned')
+                logger.debug("No partitions assigned")
                 return
             new_ids = [partition.partition for partition in partitions]
             if new_ids == self._partition_ids:
@@ -152,7 +162,7 @@ class PersistentConsumer:
         consumer.subscribe(topics, on_assign=_on_assign)
         return consumer
 
-    def _replicate_to_topic(self, topic, key, value):
+    def _replicate_to_topic(self, topic: str, key: str, value: str):
         """
         For a given topic, key and value,
         produce the message back into Kafka so we can restore from this topic.
@@ -184,12 +194,12 @@ class PersistentConsumer:
                 first_run = False
             else:
                 block_time = self._block_time
-            logger.debug('Consuming from replica and waiting {}'.format(block_time))
+            logger.debug("Consuming from replica and waiting {}".format(block_time))
             msg = self._replica_consumer.poll(timeout=block_time)
             received_all = msg is not None
             if msg:
                 if msg.error():
-                    logger.exception('Error fetching message on recovery')
+                    logger.exception("Error fetching message on recovery")
                     continue
                 key = msg.key().decode("utf-8")
                 value = msg.value().decode("utf-8")
@@ -197,11 +207,11 @@ class PersistentConsumer:
                 logger.debug("Recovered {}={} at {}".format(key, value, partition))
                 self.db.put(key, value, partition)
 
-    def changelog_topic_name(self, partition) -> str:
-        """ Generate the name of the topic for a given partition and table """
+    def changelog_topic_name(self, partition: int) -> str:
+        """ Generate the name of the topic for a given partition id and table """
         return "{}-{}-changelog".format(self.table_name, partition)
 
-    def save(self, key, value):
+    def save(self, key: str, value: str):
         """
         Save the last message to the db
 
@@ -231,7 +241,7 @@ class PersistentConsumer:
             data = self.db.get(key, partition_id)
             if data:
                 return data
-        logger.debug('No data found for key {}'.format(key))
+        logger.debug("No data found for key {}".format(key))
         return None
 
     class UnknownDatabaseSpecified(Exception):
