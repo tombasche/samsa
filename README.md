@@ -1,6 +1,10 @@
-# kafka-state-stores
+# samsa
 
-A python implementation of the state stores concept within the Kafka Streams API
+A Python implementation of the state stores concept within the Kafka Streams API
+
+## Whats in a name?
+
+Gregor Samsa was the unfortunate soul in the Kafka classic 'The Metamorphosis (1915)' who woke up one day as a giant insect.
 
 ## Installing the RocksDB client
 
@@ -22,6 +26,8 @@ The example below:
 3. It then saves the message to the store for future computation.
 
 ```
+from samsa import PersistentConsumer
+
 def loop():
     topic = "events.connection.status"
     with PersistentConsumer(
