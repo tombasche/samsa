@@ -1,4 +1,4 @@
-# samsa
+# samsa 🐞
 
 A Python implementation of the state stores concept within the Kafka Streams API
 
