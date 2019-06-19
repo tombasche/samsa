@@ -20,33 +20,32 @@ a super fast way to store stuff on disk (as fast as that really is!).
 The following is a pretty simple way of pulling data from kafka, and saving it to a local store. The default is sqlite but rocksdb is also possible.
 The example below:
 
-1. Initialises a consumer with a table called 'deployment_status' 
-2. Fetches the deployment object for the received message from topic 'events.connection.status'
-2. Compares it to the local store and handles it accordingly
-3. It then saves the message to the store for future computation.
+1. Initialises a consumer with a table called 'node_status'
+2. Queries the local store for the received key.
+3. Compares the received value with a saved value in the local store.
+4. It then saves the message to the store for future computation.
 
 ```
 from samsa import PersistentConsumer
 
 def loop():
-    topic = "events.connection.status"
+    topic = "nodes.status"
     with PersistentConsumer(
-            topic, table_name="deployment_status", group_id=KAFKA_GROUP_ID,
+            [topic], table_name="node_status", group_id=KAFKA_GROUP_ID,
             bootstrap_servers="localhost:9092"
     ) as store:
         while True:
-            msg = store.consumer.poll(timeout=3.4)
+            msg = store.consume(process_callback)
             if msg:
                 key = msg.key().decode("utf-8")
-                depl = Deployment.get(key)
-                if depl.site is not None and depl.state == "COMMISSIONED":
-                    value = json.loads(msg.value().decode("utf-8"))["data"]["status"]
-                    status = store.query(key)
-                    if status != value:
-                        print(f"Status has changed from {status} to {value} for depl {key}!")
-                    else:
-                        print("No status change, nothing to see here!")
-                    store.save(key, value)
+                value = json.loads(msg.value().decode("utf-8"))["data"]["status"]
+                
+                status = store.query(key)
+                if status != value:
+                    print(f"Status has changed from {status} to {value} for {key}!")
+                else:
+                    print("No status change, nothing to see here!")
+                store.save(key, value)
                 
 if __name__ == "__main__":
     loop()                
