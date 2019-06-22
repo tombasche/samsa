@@ -40,13 +40,11 @@ class PersistentConsumer:
             )
         self.table_name = table_name
         self._replica_topics = []
-        self._partition_ids = [0]  # set a sensible default
+        self._partition_ids = []  # set a sensible default
         self.logger = logging.getLogger("kafka")
         self.consumer = self._init_consumer(topics, group_id)
         self._group_id = group_id
         self._block_time = block_time
-
-        self._recover_from_topic()
 
     def __enter__(self):
         """ Entered context manager"""
@@ -54,9 +52,7 @@ class PersistentConsumer:
 
     def __exit__(self, exc_type, exc_value, tb):
         """Method called when exiting context manager"""
-        logger.debug("Exiting persistent consumer...")
         self.consumer.close()
-        logger.debug("Flushing any remaining messages to Kafka...")
         self.db.close()
 
     def _set_replica_topics(self):
@@ -104,11 +100,12 @@ class PersistentConsumer:
                 return
 
             self._partition_ids = new_ids
-            logger.debug("Rebalancing to partitions {}".format(self._partition_ids))
+            logger.debug("Assigning to partitions {}".format(self._partition_ids))
             self._recover_from_topic()
 
         consumer = Consumer(consumer_config, logger=self.logger)
         consumer.subscribe(topics, on_assign=_on_assign)
+        logger.debug('Started consumer for topic(s) {}'.format(topics))
         return consumer
 
     def _replicate_to_topic(self, topic: str, key: str, value: str):
@@ -128,7 +125,7 @@ class PersistentConsumer:
         }
 
         producer = Producer(producer_config)
-        producer.produce(topic=topic, key=key, value=value)
+        producer.produce(topic=topic, key=key, value=str(value))
         producer.poll(0)
         producer.flush()
         logger.debug('Produced to {}'.format(topic))
@@ -140,7 +137,7 @@ class PersistentConsumer:
         """
         consumer_config = {
             "bootstrap.servers": self.bootstrap_servers,
-            "group.id": self._group_id,
+            "group.id": '{}-recovery1'.format(self._group_id),
             "enable.partition.eof": False,
             "log.connection.close": False,
         }
@@ -148,7 +145,7 @@ class PersistentConsumer:
         consumer = Consumer(consumer_config)
         consumer.subscribe(self._replica_topics)
 
-        block_time = 9
+        block_time = 10
         received_all = False
         while not received_all:
             logger.debug("Consuming from replica and waiting {}s".format(block_time))
