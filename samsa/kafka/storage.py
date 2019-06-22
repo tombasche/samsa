@@ -145,7 +145,7 @@ class PersistentConsumer:
         consumer = Consumer(consumer_config)
         consumer.subscribe(self._replica_topics)
 
-        block_time = 10
+        block_time = 25  # give a decent amount of time
         received_all = False
         while not received_all:
             logger.debug("Consuming from replica and waiting {}s".format(block_time))
