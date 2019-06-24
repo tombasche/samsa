@@ -6,30 +6,43 @@ from typing import Optional, List, Callable, Any
 
 from confluent_kafka import Consumer, Producer, KafkaError
 
-from samsa.db.sqldb import SQLiteClient
-from samsa.kafka.exceptions import KafkaTimeoutError
+from samsa.db import ConnectionType, SQLiteClient
+from samsa.kafka import KafkaTimeoutError
 
 logger = logging.getLogger(__name__)  # noqa
 
 
-class PersistentConsumer:
+class StatefulConsumer:
     def __init__(
         self,
-        topics,
-        group_id,
-        bootstrap_servers,
-        table_name,
-        store="sqlite",
-        block_time=5.0,
+        topics: List[str],
+        group_id: str,
+        bootstrap_servers: str,
+        table_name: str,
+        store: str = ConnectionType.sqlite.value,
+        block_time: float = 25.0,
     ):
+        """
+        Class for a stateful consumer.
+        Args:
+            topics: a list of topics
+            group_id: a group id for the main consumer
+            bootstrap_servers: string of servers separated by a semicolon
+            table_name: The name of the table to hold the state required
+            store: the store provider, either rocksdb or sqlite
+            block_time:
+                A configurable block time. The default should be satisfactory
+                but this can be tweaked if the replica recovery is timing out.
+
+        """
         self.bootstrap_servers = bootstrap_servers
-        if store == "sqlite":
+        if store == ConnectionType.sqlite.value:
             self.db = SQLiteClient(
                 db_name="{}.db".format(group_id), table_name=table_name
             )
-        elif store == "rocksdb":
+        elif store == ConnectionType.rocksdb.value:
             try:
-                from statestore.db.rocksdb import RocksDBClient
+                from statestore.db import RocksDBClient
             except ImportError:
                 logger.error("RocksDB bindings are not installed...")
                 raise
@@ -48,6 +61,9 @@ class PersistentConsumer:
 
     def __enter__(self):
         """ Entered context manager"""
+        logger.debug('Created StatefulConsumer with table {}'.format(
+            self.table_name
+        ))
         return self
 
     def __exit__(self, exc_type, exc_value, tb):
@@ -145,11 +161,10 @@ class PersistentConsumer:
         consumer = Consumer(consumer_config)
         consumer.subscribe(self._replica_topics)
 
-        block_time = 25  # give a decent amount of time
         received_all = False
         while not received_all:
-            logger.debug("Consuming from replica and waiting {}s".format(block_time))
-            messages = consumer.consume(timeout=block_time)
+            logger.debug("Consuming from replica and waiting {}s".format(self._block_time))
+            messages = consumer.consume(timeout=self._block_time)
             received_all = messages is not None
             for msg in messages:
                 if msg.error():
@@ -204,7 +219,7 @@ class PersistentConsumer:
 
         pass
 
-    def consume(self, callback: Callable, *args: Any, **kwargs: Any):
+    def consume(self, callback: Callable, *args: Any, **kwargs: Any) -> Optional[Any]:
         """
         Consumes a message from Kafka and deals with errors. Each time a message is consumed the
         `callback` will be called with the message as its first argument followed by any *args and
@@ -219,10 +234,12 @@ class PersistentConsumer:
             ):
                 logger.debug("Partition EOF for {}".format((msg.topic(), msg.key())))
                 sleep(random.random() * 3)
+                resp = None
             else:
                 logger.error(
                     "Error for {}: {}".format((msg.topic(), msg.key()), msg.error())
                 )
+                resp = None
             return resp
         else:
             # timeout, nothing to read, let the caller handle it.
