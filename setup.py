@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setup(
     name="samsa",
-    version="0.0.1",
+    version="0.1.0",
     author="Thomas Basche",
     author_email="tcbasche@gmail.com",
     description="Kafka state stores in Python",

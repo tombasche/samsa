@@ -1,6 +1,9 @@
 from enum import Enum
 
-from samsa.db.rocksdb import RocksDBClient
+try:
+    from samsa.db.rocksdb import RocksDBClient
+except ImportError:
+    pass
 from samsa.db.sqldb import SQLiteClient
 
 
