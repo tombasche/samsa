@@ -12,6 +12,8 @@ from samsa.kafka import KafkaTimeoutError
 logger = logging.getLogger(__name__)  # noqa
 
 
+MAX_MESSAGES = 1000000
+
 class StatefulConsumer:
     def __init__(
         self,
@@ -153,10 +155,12 @@ class StatefulConsumer:
         """
         consumer_config = {
             "bootstrap.servers": self.bootstrap_servers,
-            "group.id": '{}-recovery1'.format(self._group_id),
+            "group.id": '{}-recovery'.format(self._group_id),
             "enable.partition.eof": False,
             "log.connection.close": False,
+            'default.topic.config': {'auto.offset.reset': 'earliest'}
         }
+
         self._set_replica_topics()
         consumer = Consumer(consumer_config)
         consumer.subscribe(self._replica_topics)
@@ -164,7 +168,9 @@ class StatefulConsumer:
         received_all = False
         while not received_all:
             logger.debug("Consuming from replica and waiting {}s".format(self._block_time))
-            messages = consumer.consume(timeout=self._block_time)
+
+            # get the maximum number of messages possible.
+            messages = consumer.consume(timeout=self._block_time, num_messages=MAX_MESSAGES)
             received_all = messages is not None
             for msg in messages:
                 if msg.error():
