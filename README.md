@@ -8,7 +8,7 @@ Gregor Samsa was the unfortunate soul in the Kafka classic 'The Metamorphosis (1
 
 ## Storage options
 
-This uses SQLite by default but also supports RocksDB by specifying `store='rocksdb'` in the PersistentConsumer init. 
+This uses SQLite by default but also supports RocksDB by specifying `store='rocksdb'` in the StatefulConsumer init.
 
 ## Installing the RocksDB client
 
@@ -30,11 +30,11 @@ The example below:
 4. It then saves the message to the store for future computation.
 
 ```
-from samsa import PersistentConsumer
+from samsa import StatefulConsumer
 
 def loop():
     topic = "nodes.status"
-    with PersistentConsumer(
+    with StatefulConsumer(
             [topic], table_name="node_status", group_id=KAFKA_GROUP_ID,
             bootstrap_servers="localhost:9092"
     ) as store:
