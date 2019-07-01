@@ -4,7 +4,7 @@ import random
 
 from typing import List, Callable, Any
 
-from confluent_kafka import Consumer, Producer, KafkaError
+from confluent_kafka import Consumer, KafkaError
 
 logger = logging.getLogger(__name__)
 
