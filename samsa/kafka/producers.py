@@ -3,7 +3,6 @@ Kafka producer.
 """
 import logging
 from confluent_kafka import Producer
-import ujson as json
 
 logger = logging.getLogger(__name__)
 
